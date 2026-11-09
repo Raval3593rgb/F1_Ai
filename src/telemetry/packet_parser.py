@@ -35,6 +35,15 @@ def parse_car_telemetry(data):
     speed = struct.unpack_from("<H", data, offset)[0]
     gear = struct.unpack_from("<b", data, offset + 15)[0]
     rpm = struct.unpack_from("<H", data, offset + 16)[0]
+    # Температуры поверхности шин (4 байта)
+    surface_temps = struct.unpack_from(
+        "<4B", data, offset + 30
+    )
+
+    # Внутренние температуры шин (4 байта)
+    inner_temps = struct.unpack_from(
+        "<4B", data, offset + 34
+    )
 
     # Преобразуем передачу в понятный вид
     if gear == 0:
@@ -48,6 +57,22 @@ def parse_car_telemetry(data):
         "speed": speed,
         "gear": gear_display,
         "rpm": rpm,
+
+        # Температура поверхности каждой шины
+        "tyres_surface": {
+            "FL": surface_temps[2],
+            "FR": surface_temps[3],
+            "RL": surface_temps[0],
+            "RR": surface_temps[1],
+        },
+
+        # Внутренняя температура каждой шины
+        "tyres_inner": {
+            "FL": inner_temps[2],
+            "FR": inner_temps[3],
+            "RL": inner_temps[0],
+            "RR": inner_temps[1],
+        },
     }
 
 
