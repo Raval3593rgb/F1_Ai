@@ -22,6 +22,11 @@ from widgets.telemetry_graph import TelemetryGraph
 from PySide6.QtWidgets import QPushButton
 from telemetry.data_logger import DataLogger
 from widgets.lap_analysis_page import LapAnalysisPage
+from widgets.ai_assistant_page import AIAssistantPage
+from telemetry.session_parser import parse_session
+from telemetry.participants_parser import parse_participants
+from telemetry.lap_parser import parse_lap_data
+from telemetry.session_metadata import save_session_metadata
 
 
 class F1Assistant(QMainWindow):
@@ -50,21 +55,22 @@ class F1Assistant(QMainWindow):
         ])
         self.pages = QStackedWidget()
         for name in [
-            "Dashboard", "Live Telemetry", "Lap Analysis", "AI Assistant", "Settings"
-        ]:
-            if name == "Live Telemetry":
-                # Страница графиков реального времени
-                page = self.create_live_page()
+                "Dashboard", "Live Telemetry", "Lap Analysis",
+                "AI Assistant", "Settings"
+            ]:
+                if name == "Live Telemetry":
+                    page = self.create_live_page()
 
-            elif name == "Lap Analysis":
-                # Страница анализа сохранённых CSV
-                page = LapAnalysisPage()
+                elif name == "Lap Analysis":
+                    page = LapAnalysisPage()
 
-            else:
-                # Остальные страницы приложения
-                page = self.create_page(name)
+                elif name == "AI Assistant":
+                    page = AIAssistantPage()
 
-            self.pages.addWidget(page)
+                else:
+                    page = self.create_page(name)
+
+                self.pages.addWidget(page)
 
         self.sidebar.currentRowChanged.connect(self.pages.setCurrentIndex)
         root_layout.addWidget(self.sidebar)
@@ -252,23 +258,189 @@ class F1Assistant(QMainWindow):
             "color: #EF4444; font-weight: bold;"
         )
 
+    
     def stop_recording(self):
-        """Завершает запись телеметрии."""
+        """Завершает запись телеметрии и сохраняет метаданные."""
 
-        self.data_logger.stop()
+        # Закрываем CSV и получаем путь к нему
+        csv_path = self.data_logger.stop()
 
+        # Получаем информацию из UDP-пакетов
+        session_info = getattr(self, "session_info", None)
+        participant_info = getattr(self, "participant_info", None)
+
+        # Сохраняем метаданные только если все данные получены
+        # и относятся к одной игровой сессии
+        if (
+            csv_path is not None
+            and session_info is not None
+            and participant_info is not None
+            and session_info["session_uid"]
+                == participant_info["session_uid"]
+        ):
+            # Имя JSON совпадает с именем CSV,
+            # но имеет окончание .metadata.json
+            metadata_filename = (
+                csv_path.stem + ".metadata.json"
+            )
+
+            metadata_path = save_session_metadata(
+                folder=csv_path.parent,
+                session_info=session_info,
+                participant_info=participant_info,
+                filename=metadata_filename
+            )
+
+            print(f"Metadata saved: {metadata_path}")
+
+        elif csv_path is not None:
+            print(
+                "Warning: Session metadata is incomplete. "
+                "CSV was saved without metadata."
+            )
+
+        # Восстанавливаем состояние кнопок интерфейса
         self.start_button.setEnabled(True)
         self.stop_button.setEnabled(False)
+
         self.recording_label.setText("NOT RECORDING")
         self.recording_label.setStyleSheet(
             "color: #98A2B3;"
         )
 
 
+
     def on_packet_received(self, data):
         
         now = time.monotonic()
+
+
+        # Проверяем, является ли пакет информацией о сессии
+        session_info = parse_session(data)
         
+        if session_info is not None:
+
+            # Сохраняем данные о текущей игровой сессии
+            self.session_info = session_info
+
+            # Выводим информацию только при изменениях,
+            # чтобы не засорять терминал повторяющимися пакетами
+            session_key = (
+                session_info["session_uid"],
+                session_info["track_id"],
+                session_info["session_type"],
+            )
+
+            if session_key != getattr(
+                self, "last_session_key", None
+            ):
+                self.last_session_key = session_key
+
+                print("\n=== F1 SESSION DETECTED ===")
+                print(f"Track: {session_info['track_name']}")
+                print(f"Session: {session_info['session_name']}")
+                print(
+                    f"Track length: {session_info['track_length']} m"
+                )
+                print(
+                    f"Total laps: {session_info['total_laps']}"
+                )
+                print(
+                    f"Weather code: {session_info['weather']}"
+                )
+                print(
+                    f"Track temperature: "
+                    f"{session_info['track_temperature']} °C"
+                )
+                print(
+                    f"Air temperature: "
+                    f"{session_info['air_temperature']} °C"
+                )
+                print("===========================\n")
+
+        
+
+        # Получаем информацию о пилоте и его машине
+        participant_info = parse_participants(data)
+
+        if participant_info is not None:
+
+            # Сохраняем сведения для будущей записи в metadata.json
+            self.participant_info = participant_info
+
+            # Формируем ключ для обнаружения изменений
+            participant_key = (
+                participant_info["session_uid"],
+                participant_info["player_index"],
+                participant_info["driver_name"],
+                participant_info["team_id"],
+                participant_info["race_number"],
+            )
+
+            # Не выводим одинаковые данные каждые 5 секунд
+            if participant_key != getattr(
+                self, "last_participant_key", None
+            ):
+                self.last_participant_key = participant_key
+
+                print("\n=== F1 DRIVER DETECTED ===")
+                print(
+                    f"Driver: {participant_info['driver_name']}"
+                )
+                print(
+                    f"Team: {participant_info['team_name']}"
+                )
+                print(
+                    f"Race number: {participant_info['race_number']}"
+                )
+                print(
+                    f"Player car index: "
+                    f"{participant_info['player_index']}"
+                )
+                print("==========================\n")
+
+
+
+        # Получаем информацию о круге и секторе
+        lap_info = parse_lap_data(data)
+
+        if lap_info is not None:
+
+            self.data_logger.update_lap(lap_info)
+            
+            # Сохраняем последние данные круга
+            self.lap_info = lap_info
+
+            # Ключ включает ID сессии, номер круга и сектор.
+            # Это позволяет определить переход между секторами
+            # без вывода информации на каждом UDP-пакете.
+            lap_key = (
+                lap_info["session_uid"],
+                lap_info["current_lap"],
+                lap_info["sector"],
+            )
+
+            if lap_key != getattr(self, "last_lap_key", None):
+                self.last_lap_key = lap_key
+
+                print("\n=== LAP UPDATE ===")
+                print(f"Lap: {lap_info['current_lap']}")
+                print(f"Sector: {lap_info['sector']}")
+                print(
+                    f"Lap distance: "
+                    f"{lap_info['lap_distance']:.1f} m"
+                )
+                print(
+                    f"Current lap time: "
+                    f"{lap_info['current_lap_time']:.3f} s"
+                )
+                print(
+                    f"Lap valid: {not lap_info['lap_invalid']}"
+                )
+                print("==================\n")
+
+
+
         self.last_packet_time = now
         
         telemetry = parse_car_telemetry(data)
