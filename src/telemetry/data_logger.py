@@ -1,4 +1,5 @@
 
+import sys
 import csv
 import time
 from datetime import datetime
@@ -10,7 +11,10 @@ class DataLogger:
 
     def __init__(self):
         # Корневая папка проекта
-        self.project_dir = Path(__file__).resolve().parents[2]
+        if getattr(sys, "frozen", False):
+            self.project_dir = Path(sys.executable).resolve().parent
+        else:
+            self.project_dir = Path(__file__).resolve().parents[2]
 
         # Папка для записанных заездов
         self.data_dir = self.project_dir / "data" / "sessions"

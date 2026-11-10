@@ -21,6 +21,7 @@ from telemetry.udp_receiver import UDPReceiver
 from widgets.telemetry_graph import TelemetryGraph
 from PySide6.QtWidgets import QPushButton
 from telemetry.data_logger import DataLogger
+from widgets.lap_analysis_page import LapAnalysisPage
 
 
 class F1Assistant(QMainWindow):
@@ -51,9 +52,19 @@ class F1Assistant(QMainWindow):
         for name in [
             "Dashboard", "Live Telemetry", "Lap Analysis", "AI Assistant", "Settings"
         ]:
-            self.pages.addWidget(
-                self.create_live_page() if name == "Live Telemetry" else self.create_page(name)
-            )
+            if name == "Live Telemetry":
+                # Страница графиков реального времени
+                page = self.create_live_page()
+
+            elif name == "Lap Analysis":
+                # Страница анализа сохранённых CSV
+                page = LapAnalysisPage()
+
+            else:
+                # Остальные страницы приложения
+                page = self.create_page(name)
+
+            self.pages.addWidget(page)
 
         self.sidebar.currentRowChanged.connect(self.pages.setCurrentIndex)
         root_layout.addWidget(self.sidebar)
