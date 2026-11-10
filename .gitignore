@@ -1,6 +1,17 @@
+# Python
 .venv/
 __pycache__/
 *.pyc
+
+# Environment and VS Code
 .env
 .vscode/
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Telemetry data
 data/raw/
+data/sessions/
